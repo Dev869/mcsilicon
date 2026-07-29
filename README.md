@@ -18,7 +18,7 @@ Be honest with yourself here, because the answer is "it depends", and for some M
 | Your chip | Does it help? | Why |
 |---|---|---|
 | **M1, M2, M3, M4** (incl. Pro / Max / Ultra) | **Yes** | These have efficiency cores. Without QoS, Minecraft's render thread lands on them regularly, and an efficiency core takes roughly twice as long on the same frame. |
-| **M5 Max** (and any chip with no efficiency tier) | **Barely** | Measured here: no difference outside run-to-run noise. Every core is a fast core, so `DEFAULT` was already fine. |
+| **M5 Max** (and any chip with no efficiency tier) | **Barely** | [Measured here](#measured-results-on-an-m5-max): no difference outside run-to-run noise. Every core is a fast core, so `DEFAULT` was already fine. |
 | **Intel Mac** | **No** | No core tiers to sort threads onto. The mod won't load anything harmful, it just has nothing to do. |
 
 You don't have to guess. Install it, launch once, and read `config/mcsilicon-tuning.txt` — it
@@ -208,20 +208,46 @@ happened:
 
 ### Measured results on an M5 Max
 
-Two findings, both negative, both worth publishing:
+**Setup.** Apple M5 Max (6×Super + 12×Performance, no efficiency tier), 64 GB, macOS 26, Java 21
+arm64, vanilla renderer with no Sodium. Render distance 16, simulation distance 12, windowed at
+854×480 logical / 1708×960 framebuffer. Three interleaved 30-second passes per condition after a
+10-second warmup, ~10,000 frames each. Raw data: [`benchmarks/m5-max.tsv`](benchmarks/m5-max.tsv).
 
-**QoS promotion: no effect outside noise.** Median 1% low 205.6 fps with it on versus 208.2 off,
-across three interleaved 30-second passes, when spread *within* a single condition was 183–213.
-That matches the hardware — QoS pays off by keeping work off efficiency cores, and this chip
-reports `6xSuper + 12xPerformance` with no efficiency tier at all, so `DEFAULT` was already
-landing on fast cores. The feature targets M1–M4, where four of eight to ten cores are efficiency
-cores. The tuning report says as much directly when it detects a machine with no efficiency tier.
+Median of three runs, with the min–max range across those runs in parentheses:
 
-**This machine is not fill-rate bound.** The `half-res` condition renders a quarter of the pixels
-(427×240 window, 854×480 framebuffer, against 1708×960) and is not faster — median 1% low 212.8
-fps against 205.6 at full resolution, well inside that same 183–213 spread. Minecraft here is CPU
-and draw-call bound, which is what Sodium addresses. That's why there is no render-scaling feature
-in this mod: it was measured, and it would buy nothing.
+| | Without mod | With mod | Difference |
+|---|---|---|---|
+| **Mean FPS** ↑ | **343.0** <br><sub>332.8 – 363.4</sub> | **354.7** <br><sub>343.2 – 358.3</sub> | +11.7 fps (+3.4%) |
+| **1% low FPS** ↑ | **208.2** <br><sub>191.1 – 211.3</sub> | **205.6** <br><sub>182.9 – 212.5</sub> | −2.7 fps (−1.3%) |
+| Median frametime ↓ | 2.69 ms <br><sub>2.42 – 2.77</sub> | 2.56 ms <br><sub>2.46 – 2.66</sub> | −0.13 ms |
+| 95th pct frametime ↓ | 4.23 ms <br><sub>4.18 – 4.30</sub> | 4.19 ms <br><sub>4.01 – 4.30</sub> | −0.04 ms |
+| 99th pct frametime ↓ | 4.80 ms <br><sub>4.73 – 5.23</sub> | 4.86 ms <br><sub>4.71 – 5.47</sub> | +0.06 ms |
+| 99.9th pct frametime ↓ | 5.75 ms <br><sub>5.59 – 6.26</sub> | 5.57 ms <br><sub>5.50 – 6.47</sub> | −0.18 ms |
+| Stutters ↓ | 43 <br><sub>25 – 78</sub> | 57 <br><sub>25 – 157</sub> | +14 |
+
+↑ higher is better, ↓ lower is better. A "stutter" is any frame taking more than twice that run's
+own median frametime, so it measures consistency relative to the run rather than an absolute
+threshold.
+
+**Read the ranges, not the differences.** Every difference in that last column is smaller than the
+spread between two runs of the *same* condition — mean FPS varied by 30 fps run-to-run without
+touching a setting, and the mod "gained" 11.7. The honest summary is **no measurable effect on
+this machine**, in either direction.
+
+That is the expected result here, not a failure. QoS promotion pays off by keeping work off
+efficiency cores, and this chip has none — it reports `6xSuper + 12xPerformance`, so `DEFAULT` was
+already landing on fast cores. The feature targets M1–M4, where four of eight to ten cores are
+efficiency cores and the render thread genuinely does get parked on one. The tuning report says
+this directly when it detects a machine with no efficiency tier.
+
+**No M1–M4 numbers here yet.** I don't own one of those chips. If you run `./bench.sh` on one, a
+PR with your TSV is very welcome — that's the configuration this mod is actually for.
+
+**Bonus finding: this machine is not fill-rate bound.** A third condition renders a quarter of the
+pixels (427×240 window, 854×480 framebuffer) and is not faster — 350.3 mean FPS / 212.8 1% low,
+inside the same noise band as full resolution. Minecraft here is CPU and draw-call bound, which is
+what Sodium addresses. That's why there is no render-scaling feature in this mod: it was measured,
+and it would buy nothing.
 
 ---
 
