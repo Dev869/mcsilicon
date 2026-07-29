@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "mcsilicon",
+  "version": "${version}",
+  "name": "mcsilicon",
+  "description": "Apple Silicon scheduling and rendering tuning for Minecraft on M-series Macs. Promotes the render, server and worker threads to the fastest core tier via macOS QoS, optionally drops the Retina backing store, and reports the launcher settings the mod cannot set itself.",
+  "authors": ["devinwilson"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "preLaunch": ["dev.devinwilson.mcsilicon.SiliconPreLaunch"],
+    "main": ["dev.devinwilson.mcsilicon.McSilicon"],
+    "client": ["dev.devinwilson.mcsilicon.McSiliconClient"]
+  },
+  "mixins": [
+    {
+      "config": "mcsilicon.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}

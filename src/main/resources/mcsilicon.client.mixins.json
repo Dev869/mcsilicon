@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "dev.devinwilson.mcsilicon.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "MinecraftFrameMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

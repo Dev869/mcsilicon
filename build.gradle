@@ -1,0 +1,81 @@
+plugins {
+    id 'fabric-loom' version '1.17.17'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+}
+
+// Standalone hardware/QoS probe, run with `./gradlew selfCheck`. Declared before `dependencies`
+// so the probeImplementation configuration exists by the time it is used.
+sourceSets {
+    probe {
+        java.srcDir 'src/probe/java'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Shipped by Minecraft itself (OSHI pulls it in); compile against it, never bundle it.
+    compileOnly 'net.java.dev.jna:jna:5.17.0'
+    probeImplementation 'net.java.dev.jna:jna:5.17.0'
+}
+
+loom {
+    runs {
+        client {
+            vmArgs '-XX:+UseZGC', '-Xmx4G', '-Xms4G'
+            // bench.sh drives these: -PbenchWorld loads a save straight from the launch args,
+            // -PbenchProps carries the -Dmcsilicon.* overrides for one run.
+            if (project.hasProperty('benchWorld')) {
+                programArgs '--quickPlaySingleplayer', project.benchWorld
+            }
+            if (project.hasProperty('benchWindow')) {
+                def wh = project.benchWindow.split('x')
+                programArgs '--width', wh[0], '--height', wh[1]
+            }
+            if (project.hasProperty('benchProps')) {
+                vmArgs project.benchProps.split(' ').findAll { it }
+            }
+        }
+    }
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand 'version': project.version
+    }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+tasks.register('selfCheck', JavaExec) {
+    group = 'verification'
+    description = 'Verifies the libSystem QoS + sysctl bindings against the real machine.'
+    classpath = sourceSets.probe.runtimeClasspath
+    mainClass = 'SelfCheck'
+}
