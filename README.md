@@ -116,6 +116,12 @@ qos.render=USER_INTERACTIVE         # main + render thread
 qos.server=USER_INTERACTIVE         # integrated (singleplayer) server thread
 qos.promoteWorkerPools=true         # also promote the background worker pool
 qos.worker=USER_INITIATED           # ...to this class
+
+realtime.enabled=false              # Mach real-time scheduling for the render thread
+realtime.periodUs=0                 # 0 = non-periodic
+realtime.computationUs=3000         # CPU guaranteed per deadline
+realtime.constraintUs=6000          # the deadline itself
+
 diagnostics.writeTuningReport=true  # write config/mcsilicon-tuning.txt
 ```
 
@@ -125,6 +131,21 @@ QoS classes, fastest to slowest:
 
 ⚠️ `UTILITY` and `BACKGROUND` are *confined* to the slowest core tier by macOS. Never put the
 render thread there — it will be dramatically worse than doing nothing at all.
+
+### Real-time scheduling (experimental, off by default)
+
+`realtime.enabled` puts the render thread on the Mach real-time scheduler. QoS asks for a fast
+core; this asks for a *deadline* — `computationUs` of CPU guaranteed within every `constraintUs`.
+It's the mechanism CoreAudio uses so audio never drops a buffer, and it **supersedes QoS** on that
+thread rather than stacking with it.
+
+It's off because it isn't free. The budget is reserved whether the frame needs it or not, and too
+large a one starves the threads feeding the renderer — you can make the game slower with it. The
+thread is always requested preemptible, so a bad setting can't wedge your machine, but it can
+absolutely cost you frames.
+
+**It has not yet been shown to beat plain QoS on any hardware.** If you want to find out on yours,
+flip it on and run `./bench.sh` — there's a `realtime` condition that isolates exactly this.
 
 ---
 
@@ -190,8 +211,15 @@ It launches the client once per condition, loads the world straight from the lau
 and quits itself. Conditions are interleaved rather than run in blocks so thermal drift doesn't
 land entirely on one of them. Results go to `run/config/mcsilicon-bench.tsv`.
 
-Three conditions: `qos-off`, `qos-on`, and `half-res` (a quarter of the pixels at the same QoS
-settings, which answers whether the machine is fill-rate bound at all).
+Five conditions, each differing from `qos-on` in exactly one thing:
+
+| condition | what it isolates |
+|---|---|
+| `qos-off` | the baseline — no promotion at all |
+| `qos-on` | QoS class promotion |
+| `realtime` | Mach deadline scheduling instead of QoS class |
+| `half-res` | a quarter of the pixels — is the machine fill-rate bound at all? |
+| `tuned` | the JVM arguments the tuning report recommends |
 
 It reports frametime percentiles, not average FPS — average FPS hides exactly the stutter that a
 scheduling change affects.

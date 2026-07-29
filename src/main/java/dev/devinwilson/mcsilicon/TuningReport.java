@@ -56,6 +56,20 @@ public final class TuningReport {
             sb.append("  worker pools   -> ")
                     .append(cfg.promoteWorkerPools ? Darwin.qosName(cfg.workerQos) : "left alone")
                     .append('\n');
+            if (SiliconPreLaunch.renderThreadRealtime) {
+                sb.append("  render thread  -> REAL-TIME, superseding the class above\n");
+                sb.append("                    ").append(cfg.realtimeComputationUs)
+                        .append("us of CPU guaranteed within every ")
+                        .append(cfg.realtimeConstraintUs).append("us");
+                if (cfg.realtimePeriodUs > 0) {
+                    sb.append(", every ").append(cfg.realtimePeriodUs).append("us");
+                } else {
+                    sb.append(", non-periodic");
+                }
+                sb.append('\n');
+            } else if (cfg.realtimeEnabled) {
+                sb.append("  real-time      -> requested but REJECTED by the kernel\n");
+            }
         }
         sb.append("\n  macOS schedules by QoS class, not Java thread priority. UTILITY and\n");
         sb.append("  BACKGROUND are confined to the slowest core tier; the JVM starts every\n");

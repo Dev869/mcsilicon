@@ -18,6 +18,16 @@ public final class Config {
     public boolean promoteWorkerPools = true;
     public int workerQos = Darwin.QOS_USER_INITIATED;
 
+    /**
+     * Mach real-time scheduling for the render thread. Off by default: it supersedes QoS, and it
+     * has not yet been shown to beat it on any machine. Flip it on, run bench.sh, keep whichever
+     * won on your hardware.
+     */
+    public boolean realtimeEnabled = false;
+    /** 0 = non-periodic: budget applies per wakeup rather than on a fixed cadence. */
+    public int realtimePeriodUs = 0;
+    public int realtimeComputationUs = 3000;
+    public int realtimeConstraintUs = 6000;
 
     public boolean writeTuningReport = true;
 
@@ -56,6 +66,13 @@ public final class Config {
         c.serverQos = Darwin.qosByName(str(props, "qos.server", "USER_INTERACTIVE"), c.serverQos);
         c.promoteWorkerPools = bool(props, "qos.promoteWorkerPools", c.promoteWorkerPools);
         c.workerQos = Darwin.qosByName(str(props, "qos.worker", "USER_INITIATED"), c.workerQos);
+
+        c.realtimeEnabled = bool(props, "realtime.enabled", c.realtimeEnabled);
+        c.realtimePeriodUs = integer(props, "realtime.periodUs", c.realtimePeriodUs);
+        c.realtimeComputationUs = integer(props, "realtime.computationUs", c.realtimeComputationUs);
+        c.realtimeConstraintUs = integer(props, "realtime.constraintUs", c.realtimeConstraintUs);
+        c.clampRealtime();
+
         c.writeTuningReport = bool(props, "diagnostics.writeTuningReport", c.writeTuningReport);
 
         c.benchEnabled = bool(props, "bench.enabled", c.benchEnabled);
@@ -101,6 +118,26 @@ public final class Config {
         }
     }
 
+    /** Longest computation budget accepted, in microseconds. */
+    private static final int MAX_COMPUTATION_US = 20_000;
+
+    /**
+     * Forces the real-time triple into a shape the kernel will accept and the machine will
+     * survive. A computation budget that is large, or nearly equal to its deadline, reserves so
+     * much of a core that the rest of the system starves — including the threads feeding this one.
+     */
+    private void clampRealtime() {
+        realtimePeriodUs = Math.max(0, realtimePeriodUs);
+        realtimeComputationUs = Math.max(100, Math.min(realtimeComputationUs, MAX_COMPUTATION_US));
+        // The deadline has to leave room for the budget, and a period (when set) has to leave room
+        // for the deadline, or the thread is late by construction.
+        realtimeConstraintUs = Math.max(realtimeConstraintUs, realtimeComputationUs);
+        if (realtimePeriodUs > 0) {
+            realtimeConstraintUs = Math.min(realtimeConstraintUs, realtimePeriodUs);
+            realtimeComputationUs = Math.min(realtimeComputationUs, realtimeConstraintUs);
+        }
+    }
+
     /** Rewrites the file so new keys show up with their documented defaults after an update. */
     public void save() {
         Path p = path();
@@ -120,6 +157,20 @@ public final class Config {
                 w.write("qos.server=" + Darwin.qosName(serverQos) + "\n");
                 w.write("qos.promoteWorkerPools=" + promoteWorkerPools + "\n");
                 w.write("qos.worker=" + Darwin.qosName(workerQos) + "\n");
+                w.write("""
+
+                        # Mach real-time scheduling for the render thread. QoS asks for a fast core;
+                        # this asks for a deadline — computationUs of CPU guaranteed within every
+                        # constraintUs. It replaces QoS on that thread rather than adding to it.
+                        #
+                        # Off by default because it is not free: the budget is reserved whether the
+                        # frame needs it or not, and too large a one starves the threads feeding it.
+                        # Measure with bench.sh before trusting it. periodUs=0 means non-periodic.
+                        """);
+                w.write("realtime.enabled=" + realtimeEnabled + "\n");
+                w.write("realtime.periodUs=" + realtimePeriodUs + "\n");
+                w.write("realtime.computationUs=" + realtimeComputationUs + "\n");
+                w.write("realtime.constraintUs=" + realtimeConstraintUs + "\n");
                 w.write("\ndiagnostics.writeTuningReport=" + writeTuningReport + "\n");
                 w.write("""
 

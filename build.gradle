@@ -37,7 +37,9 @@ dependencies {
 loom {
     runs {
         client {
-            vmArgs '-XX:+UseZGC', '-Xmx4G', '-Xms4G'
+            // Baseline JVM flags, unless bench.sh is A/B-ing them via -PbenchJvm.
+            vmArgs project.findProperty('benchJvm')?.split(' ')?.findAll { it }
+                    ?: ['-XX:+UseZGC', '-Xmx4G', '-Xms4G']
             // bench.sh drives these: -PbenchWorld loads a save straight from the launch args,
             // -PbenchProps carries the -Dmcsilicon.* overrides for one run.
             if (project.hasProperty('benchWorld')) {

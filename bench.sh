@@ -65,31 +65,44 @@ fi
 
 # Interleaved rather than all-A-then-all-B: the machine warms up and thermally drifts over a run,
 # and alternating keeps that drift from landing entirely on one condition.
+BASE_JVM='-XX:+UseZGC -Xmx4G -Xms4G'
+# What the tuning report tells people to paste into their launcher. Held against BASE_JVM so the
+# advice is measured rather than asserted; read the numbers out of config/mcsilicon-tuning.txt on
+# your own machine, these are for a 64 GB, 18-core M5 Max.
+TUNED_JVM='-XX:+UseZGC -Xmx8G -Xms8G -XX:+AlwaysPreTouch -Dmax.bg.threads=17'
+
 run_one() {
-    local label="$1" qos="$2" window="$3" i="$4"
+    local label="$1" qos="$2" window="$3" i="$4" jvm="${5:-$BASE_JVM}" extra="${6:-}"
     echo "==> $label (pass $i/$REPEATS)"
     ./gradlew runClient -q \
         -PbenchWorld="$WORLD" \
         -PbenchWindow="$window" \
+        -PbenchJvm="$jvm" \
         -PbenchProps="-Dmcsilicon.bench.enabled=true \
 -Dmcsilicon.bench.exitWhenDone=true \
 -Dmcsilicon.bench.durationSeconds=$DURATION \
 -Dmcsilicon.bench.warmupSeconds=10 \
 -Dmcsilicon.bench.label=$label \
--Dmcsilicon.qos.enabled=$qos" \
+-Dmcsilicon.qos.enabled=$qos $extra" \
         > "/tmp/mcsilicon-bench-$label-$i.log" 2>&1 \
         || { echo "    run failed, see /tmp/mcsilicon-bench-$label-$i.log" >&2; return 1; }
     tail -1 "$TSV" | awk -F'\t' \
-        '{printf "    %s @%sx, mean %s fps, 1%% low %s fps, p99 %s ms\n", $5, $6, $8, $9, $12}'
+        '{printf "    %s @%sx, rt=%s, mean %s fps, 1%% low %s fps, p99 %s ms\n", $6, $7, $4, $9, $10, $13}'
 }
 
 # half-res differs from qos-on only in window size, so that pair answers "is this machine
 # fill-rate bound at all" - i.e. whether a render-scale feature would even be worth building.
 # qos-on/qos-off isolates the scheduling change.
+# Mach real-time scheduling on the render thread. Differs from qos-on only in this flag, so the
+# pair isolates deadline scheduling from class-based scheduling.
+REALTIME_PROPS='-Dmcsilicon.realtime.enabled=true'
+
 for i in $(seq 1 "$REPEATS"); do
     run_one qos-off  false 854x480 "$i"
     run_one qos-on   true  854x480 "$i"
+    run_one realtime true  854x480 "$i" "$BASE_JVM" "$REALTIME_PROPS"
     run_one half-res true  427x240 "$i"
+    run_one tuned    true  854x480 "$i" "$TUNED_JVM"
 done
 
 echo
@@ -117,14 +130,14 @@ function spread(list,   a, c, i, j, t) {
 }
 NR>1 {
     if (!(($1) in seen)) { seen[$1] = ++order; name[order] = $1 }
-    fb[$1] = $5
-    fps[$1] = fps[$1] " " $8; low[$1] = low[$1] " " $9; p99[$1] = p99[$1] " " $12
+    fb[$1] = $6; rt[$1] = $4
+    fps[$1] = fps[$1] " " $9; low[$1] = low[$1] " " $10; p99[$1] = p99[$1] " " $13
 }
 END {
-    printf "%-11s %-11s %9s %9s %8s   %s\n", "label", "framebuffer", "meanFps", "1%low", "p99ms", "1%low spread"
+    printf "%-11s %-11s %3s %9s %9s %8s   %s\n", "label", "framebuffer", "rt", "meanFps", "1%low", "p99ms", "1%low spread"
     for (i = 1; i <= order; i++) {
         k = name[i]
-        printf "%-11s %-11s %9.2f %9.2f %8.2f   %s\n", k, fb[k], median(fps[k]), median(low[k]), median(p99[k]), spread(low[k])
+        printf "%-11s %-11s %3s %9.2f %9.2f %8.2f   %s\n", k, fb[k], rt[k], median(fps[k]), median(low[k]), median(p99[k]), spread(low[k])
     }
 }' "$TSV"
 

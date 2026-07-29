@@ -4,6 +4,7 @@ import dev.devinwilson.mcsilicon.Config;
 import dev.devinwilson.mcsilicon.Darwin;
 import dev.devinwilson.mcsilicon.McSilicon;
 import dev.devinwilson.mcsilicon.Machine;
+import dev.devinwilson.mcsilicon.SiliconPreLaunch;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 
@@ -241,12 +242,14 @@ public final class FrameBench {
     /** One tab-separated row per run, so bench.sh can diff without parsing prose. */
     private static void appendRow(Config cfg, Stats s) {
         Path tsv = dir().resolve("mcsilicon-bench.tsv");
-        String header = "label\tvalid\tqos\tworkers\tframebuffer\tscale\tframes\tmeanFps"
+        String header = "label\tvalid\tqos\trt\tworkers\tframebuffer\tscale\tframes\tmeanFps"
                 + "\tlow1pct\tp50\tp95\tp99\tp999\tmax\tstutters\n";
         String row = String.join("\t",
                 cfg.benchLabel,
                 invalidReason() == null ? "yes" : "NO:" + invalidReason().replace(' ', '_'),
                 String.valueOf(cfg.qosEnabled),
+                // What the kernel actually granted, not what the config asked for.
+                SiliconPreLaunch.renderThreadRealtime ? "yes" : "no",
                 workerState(cfg),
                 fbWidth + "x" + fbHeight,
                 logicalWidth > 0 ? fmt((double) fbWidth / logicalWidth) : "?",

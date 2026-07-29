@@ -60,7 +60,26 @@ public final class SelfCheck {
             pool.shutdownNow();
         }
 
-        // 4. Hardware probe returns something usable.
+        // 4. Mach real-time policy is accepted. On a scratch thread, not main: the policy sticks
+        //    for the life of the thread, and an RT main would distort every check after it.
+        AtomicInteger rt = new AtomicInteger(-1);
+        Thread rtThread = new Thread(
+                () -> rt.set(Darwin.setSelfRealtime(0L, 3_000_000L, 6_000_000L) ? 1 : 0), "rt");
+        rtThread.start();
+        rtThread.join();
+        System.out.println("realtime policy = " + (rt.get() == 1 ? "accepted" : "REJECTED"));
+        require(rt.get() == 1, "thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY) failed");
+
+        // Nonsense must be refused rather than silently applied — a zero budget would otherwise
+        // look like a successful promotion while reserving nothing.
+        AtomicInteger bad = new AtomicInteger(-1);
+        Thread badThread = new Thread(
+                () -> bad.set(Darwin.setSelfRealtime(0L, 0L, 0L) ? 1 : 0), "rt-bad");
+        badThread.start();
+        badThread.join();
+        require(bad.get() == 0, "zero-budget real-time request was accepted");
+
+        // 5. Hardware probe returns something usable.
         Machine m = Machine.probe();
         System.out.println("cpu             = " + m.cpu());
         System.out.println("tiers           = " + m.describeTiers());

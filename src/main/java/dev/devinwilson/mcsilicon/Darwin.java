@@ -29,12 +29,29 @@ public final class Darwin {
     public static final boolean IS_MACOS =
             System.getProperty("os.name", "").toLowerCase().contains("mac");
 
+    /** {@code THREAD_TIME_CONSTRAINT_POLICY} from {@code <mach/thread_policy.h>}. */
+    private static final int THREAD_TIME_CONSTRAINT_POLICY = 2;
+    /** {@code integer_t} count of {@code thread_time_constraint_policy_data_t}. */
+    private static final int TIME_CONSTRAINT_COUNT = 4;
+
     private interface LibSystem extends Library {
         int pthread_set_qos_class_self_np(int qosClass, int relativePriority);
 
         int qos_class_self();
 
         int sysctlbyname(String name, Pointer oldp, LongByReference oldlenp, Pointer newp, long newlen);
+
+        /** Mach port for the calling thread. Each call takes a reference that must be released. */
+        int mach_thread_self();
+
+        int mach_task_self();
+
+        int mach_port_deallocate(int task, int port);
+
+        /** Fills {@code {numer, denom}}; mach absolute units convert to ns by numer/denom. */
+        int mach_timebase_info(int[] info);
+
+        int thread_policy_set(int thread, int flavor, int[] policyInfo, int count);
     }
 
     private static final LibSystem LIB;
@@ -109,6 +126,68 @@ public final class Darwin {
             case "BACKGROUND" -> QOS_BACKGROUND;
             default -> fallback;
         };
+    }
+
+    /** Mach timebase {numer, denom}, cached; {@code null} if unavailable. */
+    private static int[] timebase;
+
+    /**
+     * Converts nanoseconds to the mach absolute time units {@code thread_policy_set} expects.
+     *
+     * <p>Clamped to {@link Integer#MAX_VALUE} because the policy struct fields are 32-bit — a
+     * silently truncated period would ask the kernel for a deadline nothing like the one intended.
+     */
+    private static int nanosToAbs(long nanos) {
+        if (nanos <= 0) return 0;
+        int[] tb = timebase;
+        if (tb == null) {
+            int[] out = new int[2];
+            try {
+                if (LIB.mach_timebase_info(out) != 0 || out[0] <= 0 || out[1] <= 0) return -1;
+            } catch (Throwable t) {
+                return -1;
+            }
+            timebase = tb = out;
+        }
+        // ns = abs * numer / denom, so abs = ns * denom / numer. Callers pass microsecond-scale
+        // values clamped by Config, so this cannot overflow a long.
+        return (int) Math.min(nanos * tb[1] / tb[0], Integer.MAX_VALUE);
+    }
+
+    /**
+     * Puts the <em>calling</em> thread on the Mach real-time scheduler: a reservation of
+     * {@code computationNs} of CPU within every {@code constraintNs} deadline, repeating every
+     * {@code periodNs} (0 for non-periodic work).
+     *
+     * <p>This supersedes QoS for the thread — a time-constraint thread is scheduled by its deadline
+     * rather than by class. Always requests preemptible; a non-preemptible thread that overruns its
+     * budget can wedge the whole machine, and no frame is worth that.
+     */
+    public static boolean setSelfRealtime(long periodNs, long computationNs, long constraintNs) {
+        if (LIB == null) return false;
+        int period = nanosToAbs(periodNs);
+        int computation = nanosToAbs(computationNs);
+        int constraint = nanosToAbs(constraintNs);
+        if (period < 0 || computation <= 0 || constraint <= 0) return false;
+
+        int thread = 0;
+        try {
+            thread = LIB.mach_thread_self();
+            if (thread == 0) return false;
+            int[] policy = {period, computation, constraint, 1 /* preemptible */};
+            return LIB.thread_policy_set(thread, THREAD_TIME_CONSTRAINT_POLICY, policy,
+                    TIME_CONSTRAINT_COUNT) == 0;
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            if (thread != 0) {
+                try {
+                    LIB.mach_port_deallocate(LIB.mach_task_self(), thread);
+                } catch (Throwable ignored) {
+                    // Leaks one port right on an already-failing path; nothing useful to do.
+                }
+            }
+        }
     }
 
     /** {@code sysctlbyname} for an integer-valued key. */

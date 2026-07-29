@@ -13,6 +13,8 @@ public final class SiliconPreLaunch implements PreLaunchEntrypoint {
 
     /** Set once here so the client entrypoint can report it without re-querying. */
     public static volatile int renderThreadQos = Darwin.QOS_UNSPECIFIED;
+    /** Whether the render thread ended up on the Mach real-time scheduler. */
+    public static volatile boolean renderThreadRealtime;
 
     @Override
     public void onPreLaunch() {
@@ -33,5 +35,22 @@ public final class SiliconPreLaunch implements PreLaunchEntrypoint {
         renderThreadQos = Qos.promoteSelf(cfg.renderQos);
         McSilicon.LOG.info("[mcsilicon] render/main thread {} -> {}",
                 Darwin.qosName(before), Darwin.qosName(renderThreadQos));
+
+        // After the QoS call, not before: time-constraint policy supersedes the class, so setting
+        // it second leaves the stronger of the two in effect. If it fails, QoS still stands.
+        if (cfg.realtimeEnabled) {
+            renderThreadRealtime = Darwin.setSelfRealtime(
+                    cfg.realtimePeriodUs * 1_000L,
+                    cfg.realtimeComputationUs * 1_000L,
+                    cfg.realtimeConstraintUs * 1_000L);
+            if (renderThreadRealtime) {
+                McSilicon.LOG.info("[mcsilicon] render/main thread -> real-time "
+                                + "(period {}us, computation {}us, constraint {}us)",
+                        cfg.realtimePeriodUs, cfg.realtimeComputationUs, cfg.realtimeConstraintUs);
+            } else {
+                McSilicon.LOG.warn("[mcsilicon] real-time policy rejected, staying on QoS {}",
+                        Darwin.qosName(renderThreadQos));
+            }
+        }
     }
 }
