@@ -3,7 +3,7 @@
   "id": "mcsilicon",
   "version": "${version}",
   "name": "mcsilicon",
-  "description": "Apple Silicon scheduling and rendering tuning for Minecraft on M-series Macs. Promotes the render, server and worker threads to the fastest core tier via macOS QoS, optionally drops the Retina backing store, and reports the launcher settings the mod cannot set itself.",
+  "description": "Apple Silicon scheduling tuning for Minecraft on M-series Macs. Promotes the render, server and worker threads to the fastest core tier via macOS QoS, and reports the launcher settings the mod cannot set itself.",
   "authors": ["devinwilson"],
   "license": "MIT",
   "environment": "*",

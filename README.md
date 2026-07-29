@@ -1,16 +1,168 @@
 # mcsilicon
 
-Apple Silicon tuning for Minecraft. Fabric, Minecraft 1.21.11, Java 21.
+**Minecraft on Apple Silicon, scheduled properly.**
 
-This does the macOS-specific work that the existing performance mods don't do. It is not a
-replacement for Sodium — install Sodium too. Nothing here duplicates it.
+macOS decides which cores a thread runs on by its *QoS class*. Java never sets one, so every
+Minecraft thread — including the render thread — starts at `DEFAULT` and can be parked on an
+efficiency core mid-frame. mcsilicon tells macOS which threads matter, and prints the launcher
+settings it can't change from inside the game.
 
-## What it does
+Fabric · Minecraft 1.21.11 · Java 21 · macOS on M-series only.
 
-**Thread QoS promotion.** macOS schedules threads by QoS class, not by Java thread priority
-(which the JVM does not map to anything on macOS without root). The JVM starts every thread at
-`QOS_CLASS_DEFAULT` and does not propagate the creating thread's class, so nothing in the game
-ever asks for the fast core tier. mcsilicon raises:
+---
+
+## Will this help *my* Mac?
+
+Be honest with yourself here, because the answer is "it depends", and for some Macs it's "no".
+
+| Your chip | Does it help? | Why |
+|---|---|---|
+| **M1, M2, M3, M4** (incl. Pro / Max / Ultra) | **Yes** | These have efficiency cores. Without QoS, Minecraft's render thread lands on them regularly, and an efficiency core takes roughly twice as long on the same frame. |
+| **M5 Max** (and any chip with no efficiency tier) | **Barely** | Measured here: no difference outside run-to-run noise. Every core is a fast core, so `DEFAULT` was already fine. |
+| **Intel Mac** | **No** | No core tiers to sort threads onto. The mod won't load anything harmful, it just has nothing to do. |
+
+You don't have to guess. Install it, launch once, and read `config/mcsilicon-tuning.txt` — it
+names your chip, your core tiers, and tells you plainly if your machine is one of the ones where
+this does very little.
+
+**mcsilicon is not a replacement for Sodium.** Sodium is still the single biggest FPS win on a
+Mac and this mod deliberately does not duplicate any of it. Install both.
+
+---
+
+## Install
+
+**1. You need these first**
+
+- macOS on an Apple Silicon Mac
+- [Fabric Loader](https://fabricmc.net/use/installer/) 0.16.0 or newer, for Minecraft 1.21.11
+- [Fabric API](https://modrinth.com/mod/fabric-api)
+- Java 21 or newer, **arm64 build** (see the Rosetta warning below)
+
+**2. Download the jar**
+
+Grab `mcsilicon-0.1.0.jar` from the [latest release](https://github.com/Dev869/mcsilicon/releases/latest).
+
+**3. Drop it in your mods folder**
+
+```
+~/Library/Application Support/minecraft/mods/
+```
+
+Quickest way to open it: in Finder press <kbd>⇧</kbd><kbd>⌘</kbd><kbd>G</kbd> and paste that path.
+If you use a custom launcher profile or a MultiMC/Prism instance, use that instance's `mods`
+folder instead.
+
+**4. Launch the game once**, then come back here.
+
+---
+
+## Check it worked
+
+Two places to look.
+
+**The log.** One line near startup:
+
+```
+[mcsilicon] Apple M2 Pro (8xPerformance + 4xEfficiency), 16 GB RAM — tuning notes: .../config/mcsilicon-tuning.txt
+```
+
+**The report.** Open `config/mcsilicon-tuning.txt` in your Minecraft folder. It's written fresh on
+every launch and looks like this:
+
+```
+MACHINE
+  cpu            Apple M5 Max
+  core tiers     6xSuper + 12xPerformance   (tier 0 is the fastest)
+  memory         64 GB unified
+  rosetta        no
+  java           21.0.12 (Homebrew)
+
+WHAT MCSILICON DID
+  render thread  -> USER_INTERACTIVE
+  server thread  -> USER_INTERACTIVE
+  worker pools   -> USER_INITIATED
+
+JVM ARGUMENTS (set these in your launcher - the mod cannot)
+
+  -Xmx8G -Xms8G -XX:+UseZGC -XX:+AlwaysPreTouch -Dmax.bg.threads=17
+```
+
+### Do the thing the report asks
+
+That JVM arguments line is the part most people skip, and it's worth more than everything else
+here. A wrong heap size or garbage collector costs more frametime than thread scheduling wins
+back — but those have to be set **before** the JVM starts, so no mod can set them for you.
+
+Copy the line from *your* report (the numbers are computed from your actual cores and RAM, don't
+copy the example above) and paste it into your launcher:
+
+- **Official launcher** → Installations → your profile → ⋯ → Edit → More Options → JVM Arguments
+- **Prism / MultiMC** → Edit Instance → Settings → Java → JVM arguments
+- **ModrinthApp** → Options → Java & Window → Java arguments
+
+Relaunch. The report's `CURRENT JVM FLAGS` section will show them taking effect.
+
+---
+
+## Settings
+
+`config/mcsilicon.properties`, created on first launch and rewritten every launch so new options
+show up with their defaults. Defaults are good; you only need this to turn things off.
+
+```properties
+qos.enabled=true                    # master switch for everything below
+qos.render=USER_INTERACTIVE         # main + render thread
+qos.server=USER_INTERACTIVE         # integrated (singleplayer) server thread
+qos.promoteWorkerPools=true         # also promote the background worker pool
+qos.worker=USER_INITIATED           # ...to this class
+diagnostics.writeTuningReport=true  # write config/mcsilicon-tuning.txt
+```
+
+QoS classes, fastest to slowest:
+
+`USER_INTERACTIVE` → `USER_INITIATED` → `DEFAULT` → `UTILITY` → `BACKGROUND`
+
+⚠️ `UTILITY` and `BACKGROUND` are *confined* to the slowest core tier by macOS. Never put the
+render thread there — it will be dramatically worse than doing nothing at all.
+
+---
+
+## FAQ
+
+**Does this work on a server?**
+The server-side half does — the integrated server thread is promoted in singleplayer, and a
+dedicated server on an M-series Mac gets the same treatment. There's nothing macOS-specific to do
+on a Linux host.
+
+**Will it break with other performance mods?**
+No. It only changes thread scheduling hints and writes a text file. Sodium, Lithium, FerriteCore
+and ModernFix all touch completely different things, and you should be running them too.
+
+**I'm on an Intel Mac / Linux / Windows.**
+Nothing happens. The libSystem bindings won't load, the report says so, and the game runs normally.
+
+**Why do I need Fabric API?**
+For the mod loading hooks. It's the single most common Fabric dependency; you almost certainly
+have it already.
+
+**How do I uninstall it?**
+Delete the jar from `mods/`. You may also want to remove the JVM arguments you pasted into your
+launcher, and delete `config/mcsilicon.properties` and `config/mcsilicon-tuning.txt`.
+
+**The report says "rosetta: YES".**
+You're running an x86 Java under translation, and it's costing you more than every optimization
+on this page combined. Install an arm64 build of Java 21 (`brew install openjdk@21`, or Temurin's
+aarch64 macOS package) and point your launcher at it.
+
+---
+
+## What it actually does
+
+**Thread QoS promotion.** The JVM starts every thread at `QOS_CLASS_DEFAULT` and does not
+propagate the creating thread's class to threads it spawns, so nothing in the game ever asks for
+the fast core tier. Java thread priority doesn't help — the JVM does not map it to anything on
+macOS without root. mcsilicon raises:
 
 | thread | class | when |
 |---|---|---|
@@ -18,75 +170,62 @@ ever asks for the fast core tier. mcsilicon raises:
 | integrated server | `USER_INTERACTIVE` | server start |
 | background worker pool | `USER_INITIATED` | client init |
 
-The IO pool is left alone on purpose: it is an unbounded cached pool whose threads are blocked
-on disk rather than CPU-bound, and it reaps them after a minute.
+The IO pool is left alone on purpose: it's an unbounded cached pool whose threads block on disk
+rather than CPU, and it reaps them after a minute anyway.
 
-**Tuning report.** Writes `config/mcsilicon-tuning.txt` at startup: what the machine is, what the
-mod did, and the JVM arguments to set in the launcher — computed from the actual core tiers and
-memory, because those have to be set before the JVM starts and no mod can do it from inside.
-It also shouts if you are running under Rosetta 2, which costs more than everything here combined.
+**Tuning report.** `config/mcsilicon-tuning.txt`, described above.
 
-## Config
-
-`config/mcsilicon.properties`, rewritten on every launch so new keys appear with their defaults.
-
-```properties
-qos.enabled=true
-qos.render=USER_INTERACTIVE
-qos.server=USER_INTERACTIVE
-qos.promoteWorkerPools=true
-qos.worker=USER_INITIATED
-diagnostics.writeTuningReport=true
-```
-
-Classes, fastest to slowest: `USER_INTERACTIVE`, `USER_INITIATED`, `DEFAULT`, `UTILITY`,
-`BACKGROUND`. `UTILITY` and `BACKGROUND` are confined to the efficiency tier — never put the
-render thread there.
+---
 
 ## Benchmark
+
+There's a frametime benchmark built in, if you want to measure the difference on your own machine
+rather than take anyone's word for it. Needs the repo checked out:
 
 ```sh
 ./bench.sh <world-name> [duration-seconds] [repeats]
 ```
 
-Runs the client once per condition with `qos.enabled` flipped, loading the world straight from
-the launch args and quitting itself when the sample is complete. Conditions are interleaved
-rather than run in blocks, so thermal drift doesn't land entirely on one of them. Results go to
-`run/config/mcsilicon-bench.tsv`. VSync, the framerate cap and game sound are forced off for the
-duration and your `options.txt` is restored afterwards.
+It launches the client once per condition, loads the world straight from the launch args, samples,
+and quits itself. Conditions are interleaved rather than run in blocks so thermal drift doesn't
+land entirely on one of them. Results go to `run/config/mcsilicon-bench.tsv`.
 
-The three conditions are `qos-off`, `qos-on`, and `half-res` (a quarter of the pixels at the same
-QoS settings, which answers whether the machine is fill-rate bound at all).
+Three conditions: `qos-off`, `qos-on`, and `half-res` (a quarter of the pixels at the same QoS
+settings, which answers whether the machine is fill-rate bound at all).
 
-It reports frametime percentiles, not average FPS — average FPS hides the stutter that a
-scheduling change actually affects.
+It reports frametime percentiles, not average FPS — average FPS hides exactly the stutter that a
+scheduling change affects.
 
-A run is marked invalid, and the script exits non-zero, if either of these was true:
+VSync, the framerate cap and game sound are forced off for the duration, and your `options.txt` is
+restored afterward. A run is marked invalid and the script exits non-zero if either of these
+happened:
 
 - **VSync or a framerate cap was on.** Every frame gets pinned to the display interval, so the
-  numbers describe the monitor. The script forces both off and restores your `options.txt` after.
+  numbers describe your monitor, not your CPU.
 - **The game window lost focus.** Minecraft stops rendering when it isn't frontmost, producing
-  thousand-FPS non-frames. This one is easy to do by accident and it silently inverted a result
-  during development, which is why it is a hard failure rather than a warning.
+  thousand-FPS non-frames. Easy to do by accident, and it silently inverted a result during
+  development, which is why it's a hard failure rather than a warning.
 
 ### Measured results on an M5 Max
 
-Two findings, both negative, both worth knowing:
+Two findings, both negative, both worth publishing:
 
 **QoS promotion: no effect outside noise.** Median 1% low 205.6 fps with it on versus 208.2 off,
-across three interleaved 30-second passes, when spread within a single condition was 183-213.
+across three interleaved 30-second passes, when spread *within* a single condition was 183–213.
 That matches the hardware — QoS pays off by keeping work off efficiency cores, and this chip
-reports `6xSuper + 12xPerformance` with no efficiency tier, so `DEFAULT` was already landing on
-fast cores. The feature targets M1-M4, where four of eight to ten cores are efficiency cores. The
-tuning report says so directly when it detects a machine with no efficiency tier.
+reports `6xSuper + 12xPerformance` with no efficiency tier at all, so `DEFAULT` was already
+landing on fast cores. The feature targets M1–M4, where four of eight to ten cores are efficiency
+cores. The tuning report says as much directly when it detects a machine with no efficiency tier.
 
 **This machine is not fill-rate bound.** The `half-res` condition renders a quarter of the pixels
-(427x240 window, 854x480 framebuffer, against 1708x960) and is not faster — median 1% low 212.8
-fps against 205.6 at full resolution, well inside the 183-213 spread. Minecraft here is CPU and draw-call bound, which is
-what Sodium addresses. That is why there is no render-scaling feature in this mod: it was
-measured, and it would buy nothing.
+(427×240 window, 854×480 framebuffer, against 1708×960) and is not faster — median 1% low 212.8
+fps against 205.6 at full resolution, well inside that same 183–213 spread. Minecraft here is CPU
+and draw-call bound, which is what Sodium addresses. That's why there is no render-scaling feature
+in this mod: it was measured, and it would buy nothing.
 
-## Build
+---
+
+## Build from source
 
 ```sh
 ./gradlew build        # jar lands in build/libs/
@@ -96,10 +235,12 @@ measured, and it would buy nothing.
 
 `selfCheck` asserts the things the mod depends on: QoS sets and reads back, child threads do
 *not* inherit it (which is why pool promotion exists at all), pool saturation reaches every
-worker, and the sysctl probe returns sane hardware. If the inheritance check ever starts
-failing, `Qos.promoteExecutor` has become dead code and should be deleted.
+worker, and the sysctl probe returns sane hardware. If the inheritance check ever starts failing,
+`Qos.promoteExecutor` has become dead code and should be deleted.
 
-## Notes
+---
+
+## Design notes
 
 Core tiers are read from `hw.perflevelN.name` rather than assumed to be P and E. An M1–M4 reports
 `Performance` + `Efficiency`; an M5 Max reports `Super` + `Performance` with no efficiency tier at
@@ -111,3 +252,7 @@ dependency and no native build step. The FFM API would be tidier but is still pr
 To retarget a Minecraft version, change `minecraft_version` / `fabric_version` in
 `gradle.properties`. Note that a version only builds once Mojang publishes its official mappings —
 26.2 does not have them yet, which is why this targets 1.21.11.
+
+---
+
+MIT. See [LICENSE](LICENSE).
