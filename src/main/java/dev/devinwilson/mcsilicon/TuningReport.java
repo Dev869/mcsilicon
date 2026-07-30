@@ -71,6 +71,11 @@ public final class TuningReport {
                 sb.append("  real-time      -> requested but REJECTED by the kernel\n");
             }
         }
+        if (Activity.active()) {
+            sb.append("  timer coalescing and App Nap -> disabled process-wide\n");
+        } else if (cfg.latencyCritical) {
+            sb.append("  latency-critical -> requested but FAILED: ").append(Activity.error).append('\n');
+        }
         sb.append("\n  macOS schedules by QoS class, not Java thread priority. UTILITY and\n");
         sb.append("  BACKGROUND are confined to the slowest core tier; the JVM starts every\n");
         sb.append("  thread at DEFAULT and does not inherit, so each one is raised explicitly.\n");

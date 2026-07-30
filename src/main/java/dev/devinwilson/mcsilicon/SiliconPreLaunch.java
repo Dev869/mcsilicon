@@ -21,6 +21,17 @@ public final class SiliconPreLaunch implements PreLaunchEntrypoint {
         if (!Darwin.IS_MACOS) return;
 
         Config cfg = Config.get();
+
+        // Independent of qos.enabled: this is a process-wide power hint, not thread scheduling, and
+        // someone turning QoS promotion off still wants their wakeups on time.
+        if (cfg.latencyCritical) {
+            if (Activity.beginLatencyCritical()) {
+                McSilicon.LOG.info("[mcsilicon] App Nap and timer coalescing disabled for this process");
+            } else {
+                McSilicon.LOG.warn("[mcsilicon] could not go latency-critical: {}", Activity.error);
+            }
+        }
+
         if (!cfg.qosEnabled) {
             McSilicon.LOG.info("[mcsilicon] QoS promotion disabled in config");
             return;

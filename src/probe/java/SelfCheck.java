@@ -1,3 +1,4 @@
+import dev.devinwilson.mcsilicon.Activity;
 import dev.devinwilson.mcsilicon.Darwin;
 import dev.devinwilson.mcsilicon.Machine;
 import dev.devinwilson.mcsilicon.Qos;
@@ -70,8 +71,9 @@ public final class SelfCheck {
         System.out.println("realtime policy = " + (rt.get() == 1 ? "accepted" : "REJECTED"));
         require(rt.get() == 1, "thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY) failed");
 
-        // Nonsense must be refused rather than silently applied — a zero budget would otherwise
-        // look like a successful promotion while reserving nothing.
+        // A zero budget must be refused rather than reported as a successful promotion. Caught by
+        // Darwin's own argument check before the kernel sees it, which is the point: that guard is
+        // what stands between a typo'd config and a thread that looks promoted but reserved nothing.
         AtomicInteger bad = new AtomicInteger(-1);
         Thread badThread = new Thread(
                 () -> bad.set(Darwin.setSelfRealtime(0L, 0L, 0L) ? 1 : 0), "rt-bad");
@@ -79,7 +81,15 @@ public final class SelfCheck {
         badThread.join();
         require(bad.get() == 0, "zero-budget real-time request was accepted");
 
-        // 5. Hardware probe returns something usable.
+        // 5. NSProcessInfo latency-critical activity. This one goes through objc_msgSend, where a
+        //    mistyped call crashes rather than returning an error, so exercising it here is the
+        //    point — a probe process is a much better place to find that out than a game launch.
+        boolean latency = Activity.beginLatencyCritical();
+        System.out.println("latency-critical= " + (latency ? "granted" : "FAILED: " + Activity.error));
+        require(latency, "beginActivityWithOptions: failed: " + Activity.error);
+        require(Activity.beginLatencyCritical(), "second call should be a no-op returning true");
+
+        // 6. Hardware probe returns something usable.
         Machine m = Machine.probe();
         System.out.println("cpu             = " + m.cpu());
         System.out.println("tiers           = " + m.describeTiers());

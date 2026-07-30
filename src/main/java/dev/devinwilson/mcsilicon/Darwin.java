@@ -129,7 +129,7 @@ public final class Darwin {
     }
 
     /** Mach timebase {numer, denom}, cached; {@code null} if unavailable. */
-    private static int[] timebase;
+    private static volatile int[] timebase;
 
     /**
      * Converts nanoseconds to the mach absolute time units {@code thread_policy_set} expects.

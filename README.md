@@ -122,6 +122,8 @@ realtime.periodUs=0                 # 0 = non-periodic
 realtime.computationUs=3000         # CPU guaranteed per deadline
 realtime.constraintUs=6000          # the deadline itself
 
+latency.critical=false              # opt out of App Nap and timer coalescing
+
 diagnostics.writeTuningReport=true  # write config/mcsilicon-tuning.txt
 ```
 
@@ -146,6 +148,17 @@ absolutely cost you frames.
 
 **It has not yet been shown to beat plain QoS on any hardware.** If you want to find out on yours,
 flip it on and run `./bench.sh` — there's a `realtime` condition that isolates exactly this.
+
+### Timer coalescing (experimental, off by default)
+
+`latency.critical` opts the whole process out of App Nap and, more importantly, out of **timer
+coalescing**. macOS deliberately slews short timer wakeups so several fire together and the CPU can
+stay asleep longer — good for battery, bad for a loop that wants a wakeup every few milliseconds.
+`NSActivityLatencyCritical` declines both.
+
+Much lower risk than the real-time policy: it reserves nothing and only declines a power
+optimisation. The cost is battery life. Also unmeasured, so also off — there's a `nocoal` benchmark
+condition for it.
 
 ---
 
@@ -211,13 +224,14 @@ It launches the client once per condition, loads the world straight from the lau
 and quits itself. Conditions are interleaved rather than run in blocks so thermal drift doesn't
 land entirely on one of them. Results go to `run/config/mcsilicon-bench.tsv`.
 
-Five conditions, each differing from `qos-on` in exactly one thing:
+Six conditions, each differing from `qos-on` in exactly one thing:
 
 | condition | what it isolates |
 |---|---|
 | `qos-off` | the baseline — no promotion at all |
 | `qos-on` | QoS class promotion |
 | `realtime` | Mach deadline scheduling instead of QoS class |
+| `nocoal` | App Nap and timer coalescing disabled |
 | `half-res` | a quarter of the pixels — is the machine fill-rate bound at all? |
 | `tuned` | the JVM arguments the tuning report recommends |
 

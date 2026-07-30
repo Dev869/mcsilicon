@@ -96,11 +96,14 @@ run_one() {
 # Mach real-time scheduling on the render thread. Differs from qos-on only in this flag, so the
 # pair isolates deadline scheduling from class-based scheduling.
 REALTIME_PROPS='-Dmcsilicon.realtime.enabled=true'
+# App Nap and timer coalescing off. Also differs from qos-on in one flag only.
+NOCOALESCE_PROPS='-Dmcsilicon.latency.critical=true'
 
 for i in $(seq 1 "$REPEATS"); do
     run_one qos-off  false 854x480 "$i"
     run_one qos-on   true  854x480 "$i"
     run_one realtime true  854x480 "$i" "$BASE_JVM" "$REALTIME_PROPS"
+    run_one nocoal   true  854x480 "$i" "$BASE_JVM" "$NOCOALESCE_PROPS"
     run_one half-res true  427x240 "$i"
     run_one tuned    true  854x480 "$i" "$TUNED_JVM"
 done

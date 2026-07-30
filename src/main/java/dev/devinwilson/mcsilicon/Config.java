@@ -29,6 +29,13 @@ public final class Config {
     public int realtimeComputationUs = 3000;
     public int realtimeConstraintUs = 6000;
 
+    /**
+     * Opt the process out of App Nap and timer coalescing. Off by default for the same reason as
+     * the real-time policy: unmeasured. Cheaper and far less risky than that one, though — it only
+     * declines a power optimisation, it reserves nothing.
+     */
+    public boolean latencyCritical = false;
+
     public boolean writeTuningReport = true;
 
     /** Frametime benchmark. Driven by bench.sh via -Dmcsilicon.* overrides. */
@@ -72,6 +79,7 @@ public final class Config {
         c.realtimeComputationUs = integer(props, "realtime.computationUs", c.realtimeComputationUs);
         c.realtimeConstraintUs = integer(props, "realtime.constraintUs", c.realtimeConstraintUs);
         c.clampRealtime();
+        c.latencyCritical = bool(props, "latency.critical", c.latencyCritical);
 
         c.writeTuningReport = bool(props, "diagnostics.writeTuningReport", c.writeTuningReport);
 
@@ -171,6 +179,13 @@ public final class Config {
                 w.write("realtime.periodUs=" + realtimePeriodUs + "\n");
                 w.write("realtime.computationUs=" + realtimeComputationUs + "\n");
                 w.write("realtime.constraintUs=" + realtimeConstraintUs + "\n");
+                w.write("""
+
+                        # Opt out of App Nap and timer coalescing. macOS slews short wakeups so
+                        # several land together and the CPU can idle longer, which is good for
+                        # battery and bad for a render loop that wants a wakeup every few ms.
+                        """);
+                w.write("latency.critical=" + latencyCritical + "\n");
                 w.write("\ndiagnostics.writeTuningReport=" + writeTuningReport + "\n");
                 w.write("""
 
